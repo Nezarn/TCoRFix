@@ -1,32 +1,68 @@
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
 #include <MinHook.h>
-#include <string>
+
 #include <gl/GL.h>
 #include <iostream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #pragma comment(lib, "opengl32.lib")
 
-// These are defined in glext.h, but its kinda waste to include just for these 3
+// These are defined in glext.h, but its kinda waste to include just for these
 #define GL_MAX_TEXTURE_UNITS              0x84E2
 #define GL_MAX_TEXTURE_IMAGE_UNITS        0x8872
 #define GL_FRAGMENT_PROGRAM_ARB           0x8804
+#define GL_SAMPLES_PASSED_ARB             0x8914
+#define APIENTRYP APIENTRY *
 
 // Settings
-bool fixMiscBugs = false;
-bool enableNVonATI = false;
-bool flickerWorkaround = false;
+bool bFixMiscBugs = false;
+bool bEnable2_0PlusPlus = false;
+bool bFlickerWorkaround = false;
 
 // Buffer returned for glGetString(GL_EXTENSIONS)
-GLubyte ret[1024];
+GLubyte extensionList[1024];
 
 // Original functions
+void (WINAPI* glColor4f_ori)(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
 void (WINAPI* glGetIntegerv_ori)(GLenum pname, GLint* data);
 const GLubyte* (WINAPI* glGetString_ori)(GLenum name);
 PROC (WINAPI* wglGetProcAddress_ori)(LPCSTR procName);
 
 // OpenGL ARB functions
-typedef void (APIENTRY *PFNGLPROGRAMSTRINGARBPROC)(GLenum target, GLenum format, GLsizei len, const void *string);
+typedef void (APIENTRYP PFNGLPROGRAMSTRINGARBPROC)(GLenum target, GLenum format, GLsizei len, const void *string);
+typedef void (APIENTRYP PFNGLVERTEXATTRIB4FPROC) (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
+typedef void (APIENTRYP PFNGLGENOCCLUSIONQUERIESNVPROC) (GLsizei n, GLuint *ids);
+typedef void (APIENTRYP PFNGLDELETEOCCLUSIONQUERIESNVPROC) (GLsizei n, const GLuint *ids);
+typedef GLboolean (APIENTRYP PFNGLISOCCLUSIONQUERYNVPROC) (GLuint id);
+typedef void (APIENTRYP PFNGLBEGINOCCLUSIONQUERYNVPROC) (GLuint id);
+typedef void (APIENTRYP PFNGLENDOCCLUSIONQUERYNVPROC) (void);
+typedef void (APIENTRYP PFNGLGETOCCLUSIONQUERYIVNVPROC) (GLuint id, GLenum pname, GLint *params);
+typedef void (APIENTRYP PFNGLGETOCCLUSIONQUERYUIVNVPROC) (GLuint id, GLenum pname, GLuint *params);
+typedef void (APIENTRYP PFNGLGENQUERIESARBPROC) (GLsizei n, GLuint *ids);
+typedef void (APIENTRYP PFNGLDELETEQUERIESARBPROC) (GLsizei n, const GLuint *ids);
+typedef GLboolean (APIENTRYP PFNGLISQUERYARBPROC) (GLuint id);
+typedef void (APIENTRYP PFNGLBEGINQUERYARBPROC) (GLenum target, GLuint id);
+typedef void (APIENTRYP PFNGLENDQUERYARBPROC) (GLenum target);
+typedef void (APIENTRYP PFNGLGETQUERYIVARBPROC) (GLenum target, GLenum pname, GLint *params);
+typedef void (APIENTRYP PFNGLGETQUERYOBJECTIVARBPROC) (GLuint id, GLenum pname, GLint *params);
+typedef void (APIENTRYP PFNGLGETQUERYOBJECTUIVARBPROC) (GLuint id, GLenum pname, GLuint *params);
 PFNGLPROGRAMSTRINGARBPROC glProgramStringARB = NULL;
+PFNGLVERTEXATTRIB4FPROC glVertexAttrib4f = NULL;
+PFNGLGENQUERIESARBPROC glGenQueriesARB = NULL;
+PFNGLDELETEQUERIESARBPROC glDeleteQueriesARB = NULL;
+PFNGLISQUERYARBPROC glIsQueryARB = NULL;
+PFNGLBEGINQUERYARBPROC glBeginQueryARB = NULL;
+PFNGLENDQUERYARBPROC glEndQueryARB = NULL;
+PFNGLGETQUERYIVARBPROC glGetQueryivARB = NULL;
+PFNGLGETQUERYOBJECTIVARBPROC glGetQueryObjectivARB = NULL;
+PFNGLGETQUERYOBJECTUIVARBPROC glGetQueryObjectuivARB = NULL;
+
+// WGL
+typedef BOOL (WINAPI *PFNWGLCHOOSEPIXELFORMATARBPROC)(HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats);
+PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB = NULL;
+BOOL WINAPI wglChoosePixelFormatARB_hook(HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats);
 
 void WINAPI glGetIntegerv_hook(GLenum pname, GLint* data)
 {
@@ -41,6 +77,41 @@ void WINAPI glGetIntegerv_hook(GLenum pname, GLint* data)
 	glGetIntegerv_ori(pname, data);
 }
 
+void WINAPI glColor4f_hook(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha)
+{
+	glVertexAttrib4f(3, red, green, blue, alpha);
+}
+
+std::vector<std::string>requiredExtensions = 
+{
+	"GL_ARB_fragment_program",
+	"GL_ARB_multitexture",
+	"GL_ARB_texture_compression",
+	"GL_ARB_texture_cube_map",
+	"GL_ARB_texture_env_combine",
+	"GL_ARB_texture_env_dot3",
+	"GL_ARB_vertex_buffer_object",
+	"GL_ARB_vertex_program",
+	"GL_EXT_bgra",
+	"GL_EXT_secondary_color",
+	"GL_EXT_stencil_two_side",
+	"GL_EXT_stencil_wrap",
+	"GL_EXT_texture_compression_s3tc",
+	"GL_EXT_texture_filter_anisotropic",
+	"GL_EXT_texture_lod_bias",
+	"GL_NV_copy_depth_to_color",
+	"GL_NV_fence",
+	"GL_NV_fragment_program",
+	"GL_NV_fragment_program_option",
+	"GL_NV_fragment_program2",
+	"GL_NV_occlusion_query",
+	"GL_NV_register_combiners",
+	"GL_NV_register_combiners2",
+	"GL_NV_texture_shader",
+	"GL_NV_vertex_array_range",
+	"GL_NV_vertex_program"
+};
+
 const GLubyte* WINAPI glGetString_hook(GLenum name)
 {
 	if (name == GL_EXTENSIONS)
@@ -48,40 +119,31 @@ const GLubyte* WINAPI glGetString_hook(GLenum name)
 		// This will contain our extensions
 		std::string extList;
 
+		if(bEnable2_0PlusPlus)
+			extList = "GL_NV_fragment_program GL_NV_fragment_program_option GL_NV_fragment_program2 GL_NV_occlusion_query GL_NV_copy_depth_to_color ";
+
 		// Get vendor
 		std::string vendorstr = reinterpret_cast<const char*>(glGetString_ori(GL_VENDOR));
 
-		// Check vendor
-		size_t pos = vendorstr.find("NVIDIA");
-		if (pos != std::string::npos)
+		// Get extensions and build our own list with the required ones only
+		std::string extensions = reinterpret_cast<const char*>(glGetString_ori(GL_EXTENSIONS));
+
+		for (size_t i = 0; i < requiredExtensions.size(); i++)
 		{
-			extList = "GL_ARB_FRAGMENT_PROGRAM GL_ARB_MULTITEXTURE GL_ARB_TEXTURE_COMPRESSION GL_ARB_TEXTURE_CUBE_MAP GL_ARB_TEXTURE_ENV_COMBINE GL_ARB_TEXTURE_ENV_DOT3 "
-					"GL_ARB_VERTEX_BUFFER_OBJECT GL_ARB_VERTEX_PROGRAM GL_EXT_BGRA GL_EXT_SECONDARY_COLOR GL_EXT_STENCIL_TWO_SIDE GL_EXT_STENCIL_WRAP GL_EXT_TEXTURE_COMPRESSION_S3TC "
-					"GL_EXT_TEXTURE_FILTER_ANISOTROPIC GL_EXT_TEXTURE_LOD_BIAS GL_NV_COPY_DEPTH_TO_COLOR GL_NV_FENCE GL_NV_FRAGMENT_PROGRAM GL_NV_FRAGMENT_PROGRAM_OPTION "
-					"GL_NV_FRAGMENT_PROGRAM2 GL_NV_OCCLUSION_QUERY GL_NV_REGISTER_COMBINERS GL_NV_REGISTER_COMBINERS2 GL_NV_TEXTURE_SHADER GL_NV_VERTEX_ARRAY_RANGE GL_NV_VERTEX_PROGRAM";
-		}
-		else if ((pos = vendorstr.find("ATI")) != std::string::npos) // AMD still returns ATI Technologies Inc.
-		{
-			// Return extra extensions so we have 2.0++ option enabled
-			// This works because while AMD doesn't expose GL_NV_FRAGMENT_PROGRAM2 (and GL_NV_vertex_program3) it actually works.
-			if (enableNVonATI)
+			size_t pos = 0;
+			// If we have the 2.0++ force enabled, ignore the already included extensions
+			if(bEnable2_0PlusPlus && (pos = extList.find(requiredExtensions[i]) != std::string::npos))
+				continue;
+			pos = extensions.find(requiredExtensions[i]);
+			if (pos != std::string::npos)
 			{
-				extList = "GL_ARB_FRAGMENT_PROGRAM GL_ARB_MULTITEXTURE GL_ARB_TEXTURE_COMPRESSION GL_ARB_TEXTURE_CUBE_MAP GL_ARB_TEXTURE_ENV_COMBINE GL_ARB_TEXTURE_ENV_DOT3 "
-					"GL_ARB_VERTEX_BUFFER_OBJECT GL_ARB_VERTEX_PROGRAM GL_EXT_BGRA GL_EXT_SECONDARY_COLOR GL_EXT_STENCIL_TWO_SIDE GL_EXT_STENCIL_WRAP GL_EXT_TEXTURE_COMPRESSION_S3TC "
-					"GL_EXT_TEXTURE_FILTER_ANISOTROPIC GL_EXT_TEXTURE_LOD_BIAS GL_NV_COPY_DEPTH_TO_COLOR GL_NV_FENCE GL_NV_FRAGMENT_PROGRAM GL_NV_FRAGMENT_PROGRAM_OPTION "
-					"GL_NV_FRAGMENT_PROGRAM2 GL_NV_OCCLUSION_QUERY GL_NV_TEXTURE_SHADER GL_NV_VERTEX_ARRAY_RANGE GL_NV_VERTEX_PROGRAM";
-			}
-			else
-			{
-				extList = "GL_ARB_FRAGMENT_PROGRAM GL_ARB_MULTITEXTURE GL_ARB_TEXTURE_COMPRESSION GL_ARB_TEXTURE_CUBE_MAP GL_ARB_TEXTURE_ENV_COMBINE GL_ARB_TEXTURE_ENV_DOT3 "
-					"GL_ARB_VERTEX_BUFFER_OBJECT GL_ARB_VERTEX_PROGRAM GL_EXT_BGRA GL_EXT_SECONDARY_COLOR GL_EXT_STENCIL_WRAP GL_EXT_TEXTURE_COMPRESSION_S3TC "
-					"GL_EXT_TEXTURE_FILTER_ANISOTROPIC GL_EXT_TEXTURE_LOD_BIAS ";
+				extList += requiredExtensions[i] + " ";
 			}
 		}
 
-		memcpy(ret, extList.c_str(), 1024);
+		memcpy(extensionList, extList.c_str(), 1024);
 
-		return ret;
+		return extensionList;
 	}
 
 	const GLubyte* ret = glGetString_ori(name);
@@ -89,24 +151,90 @@ const GLubyte* WINAPI glGetString_hook(GLenum name)
 	return ret;
 }
 
+std::map<std::string, std::string> shaderPatches
+{
+	{"OPTION NV_fragment_program2;", "TEMP tcorfix;"},
+	{"SHORT TEMP", "TEMP"},
+	{"SHORT OUTPUT", "OUTPUT"},
+	{"MULH", "MUL"},
+	{"MADH", "MAD"},
+	{"MUL_SAT depth, |depth|, depthtolerance.a;", "ABS tcorfix, depth;\nMUL_SAT depth, tcorfix, depthtolerance.a;\nMOV tcorfix, {0.0, 0.0, 0.0, 0.0};"},
+	{"NRMH NormalMapTexel.rgb, NormalMapTexel;", "DP3 tcorfix.a, NormalMapTexel, NormalMapTexel;\nRSQ tcorfix.a, tcorfix.a;\nMUL NormalMapTexel.rgb, NormalMapTexel, tcorfix.a;\nMOV tcorfix, {0.0, 0.0, 0.0, 0.0};"},
+	{"NRMH TSLV.rgb, IPTSLV;", "DP3 tcorfix.a, IPTSLV, IPTSLV;\nRSQ tcorfix.a, tcorfix.a;\nMUL TSLV.rgb, IPTSLV, tcorfix.a;\nMOV tcorfix, {0.0, 0.0, 0.0, 0.0};"},
+	{"NRMH TSEV.rgb, IPTSEV;", "DP3 tcorfix.a, IPTSEV, IPTSEV;\nRSQ tcorfix.a, tcorfix.a;\nMUL TSEV.rgb, IPTSEV, tcorfix.a;\nMOV tcorfix, {0.0, 0.0, 0.0, 0.0};"}
+};
+
+void replaceAll(std::string& str, const std::string& from, const std::string& to)
+{
+	size_t pos = 0;
+	while ((pos = str.find(from, pos)) != std::string::npos)
+	{
+		str.replace(pos, from.length(), to);
+		pos += to.length();
+	}
+}
+
 void APIENTRY glProgramStringARB_hook(GLenum target, GLenum format, GLsizei len, const void* string)
 {
-	if(target == GL_FRAGMENT_PROGRAM_ARB && len == 9467) // XRShader_FP20SS_SpecNormal.fp
+	if (target == GL_FRAGMENT_PROGRAM_ARB)
 	{
 		std::string prog = reinterpret_cast<const char*>(string);
-		std::string tofind = "DP4 r0.a, smpacked0, 0.125;";
-		size_t pos = prog.find(tofind);
-		if (pos != std::string::npos)
+
+		if(bEnable2_0PlusPlus)
 		{
-			// Kinda hacky but seems to work.
-			prog.replace(pos, tofind.length(), "DP4 r0.a, smpacked0, 0.125;\nNRM r0, r0;\nNRM r0, r0;");
-			glProgramStringARB(target, format, strlen(prog.c_str()), prog.c_str());
-			
-			return;
+			for (const auto& sp : shaderPatches)
+				replaceAll(prog, sp.first, sp.second);
 		}
+
+		// Hack: I'm still not sure what is the root cause, but removing this MUL seems to work on every gpu?
+		if (len == 9467 && bFlickerWorkaround) // XRShader_FP20SS_SpecNormal.fp
+		{
+			replaceAll(prog, "MUL r0.rgb, r0, ShadowMaskTexel.a;", "#MUL r0.rgb, r0, ShadowMaskTexel.a;");
+		}
+
+		glProgramStringARB(target, format, strlen(prog.c_str()), prog.c_str());
+
+		return;
 	}
 
 	glProgramStringARB(target, format, len, string);
+}
+
+void APIENTRY glGenOcclusionQueriesNV_hook(GLsizei n, GLuint *ids)
+{
+	glGenQueriesARB(n, ids);
+}
+
+void APIENTRY glDeleteOcclusionQueriesNV_hook(GLsizei n, const GLuint *ids)
+{
+	glDeleteQueriesARB(n, ids);
+}
+
+GLboolean APIENTRY glIsOcclusionQueryNV_hook(GLuint id)
+{
+	return glIsQueryARB(id);
+}
+
+void APIENTRY glBeginOcclusionQueryNV_hook(GLuint id)
+{
+	glBeginQueryARB(GL_SAMPLES_PASSED_ARB, id);
+}
+
+void APIENTRY glEndOcclusionQueryNV_hook(void)
+{
+	glEndQueryARB(GL_SAMPLES_PASSED_ARB);
+}
+
+void APIENTRY glGetOcclusionQueryivNV_hook(GLuint id, GLenum pname, GLint *params)
+{
+	// pname is same in both
+	glGetQueryObjectivARB(id, pname, params);
+}
+
+void APIENTRY glGetOcclusionQueryuivNV_hook(GLuint id, GLenum pname, GLuint *params)
+{
+	// pname is same in both
+	glGetQueryObjectuivARB(id, pname, params);
 }
 
 PROC WINAPI wglGetProcAddress_hook(LPCSTR procName)
@@ -115,8 +243,50 @@ PROC WINAPI wglGetProcAddress_hook(LPCSTR procName)
 	{
 		// Get the ProcAddress for glProgramStringARB
 		glProgramStringARB = (PFNGLPROGRAMSTRINGARBPROC)wglGetProcAddress_ori("glProgramStringARB");
+
+		// also get address for other things game doesn't use but we do
+		if(bEnable2_0PlusPlus)
+		{
+			glVertexAttrib4f = (PFNGLVERTEXATTRIB4FPROC)wglGetProcAddress_ori("glVertexAttrib4f");
+		}
+
 		// Return our hook
 		return (PROC)glProgramStringARB_hook;
+	}
+	else if(strcmp("glGenOcclusionQueriesNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glGenQueriesARB = (PFNGLGENQUERIESARBPROC)wglGetProcAddress_ori("glGenQueriesARB");
+		return (PROC)glGenOcclusionQueriesNV_hook;
+	}
+	else if(strcmp("glDeleteOcclusionQueriesNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glDeleteQueriesARB = (PFNGLDELETEQUERIESARBPROC)wglGetProcAddress_ori("glDeleteQueriesARB");
+		return (PROC)glDeleteOcclusionQueriesNV_hook;
+	}
+	else if(strcmp("glIsOcclusionQueryNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glIsQueryARB = (PFNGLISQUERYARBPROC)wglGetProcAddress_ori("glIsQueryARB");
+		return (PROC)glIsOcclusionQueryNV_hook;
+	}
+	else if(strcmp("glBeginOcclusionQueryNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glBeginQueryARB = (PFNGLBEGINQUERYARBPROC)wglGetProcAddress_ori("glBeginQueryARB");
+		return (PROC)glBeginOcclusionQueryNV_hook;
+	}
+	else if(strcmp("glEndOcclusionQueryNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glEndQueryARB = (PFNGLENDQUERYARBPROC)wglGetProcAddress_ori("glEndQueryARB");
+		return (PROC)glEndOcclusionQueryNV_hook;
+	}
+	else if(strcmp("glGetOcclusionQueryivNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glGetQueryObjectivARB = (PFNGLGETQUERYOBJECTIVARBPROC)wglGetProcAddress_ori("glGetQueryObjectivARB");
+		return (PROC)glGetOcclusionQueryivNV_hook;
+	}
+	else if(strcmp("glGetOcclusionQueryuivNV", procName) == 0 && bEnable2_0PlusPlus)
+	{
+		glGetQueryObjectuivARB = (PFNGLGETQUERYOBJECTUIVARBPROC)wglGetProcAddress_ori("glGetQueryObjectuivARB");
+		return (PROC)glGetOcclusionQueryuivNV_hook;
 	}
 
 	return wglGetProcAddress_ori(procName);
@@ -126,9 +296,9 @@ void Init()
 {
 	// Read settings from ini
 	const char* ini = ".\\TCoRFix.ini";
-	fixMiscBugs = GetPrivateProfileIntA("General", "Fix Misc Bugs", 0, ini);
-	enableNVonATI = GetPrivateProfileIntA("General", "Enable 2.0++ on AMD/ATI", 0, ini);
-	flickerWorkaround = GetPrivateProfileIntA("General", "Eyeshine Flicker Workaround", 0, ini);
+	bFixMiscBugs = GetPrivateProfileIntA("General", "Fix Misc Bugs", 0, ini);
+	bEnable2_0PlusPlus = GetPrivateProfileIntA("General", "Enable 2.0++ on any GPU", 1, ini);
+	bFlickerWorkaround = GetPrivateProfileIntA("General", "Eyeshine Flicker Workaround", 1, ini);
 
 	// Preload ogl dll (in case its not loaded yet, so minhook can always work)
 	LoadLibraryA("opengl32.dll");
@@ -137,16 +307,21 @@ void Init()
 	MH_Initialize();
 	MH_CreateHookApi(L"opengl32.dll", "glGetString", glGetString_hook, (void**)&glGetString_ori);
 
-	if (fixMiscBugs)
+	if (bFixMiscBugs)
 	{
 		MH_CreateHookApi(L"opengl32.dll", "glGetIntegerv", glGetIntegerv_hook, (void**)&glGetIntegerv_ori);
 	}
 
-	if (flickerWorkaround)
+	if (bFlickerWorkaround)
 	{
 		MH_CreateHookApi(L"opengl32.dll", "wglGetProcAddress", wglGetProcAddress_hook, (void**)&wglGetProcAddress_ori);
 	}
 
+	if(bEnable2_0PlusPlus)
+	{
+		MH_CreateHookApi(L"opengl32.dll", "glColor4f", glColor4f_hook, (void**)&glColor4f_ori);
+	}
+	
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 

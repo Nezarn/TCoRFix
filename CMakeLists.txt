@@ -14,8 +14,8 @@ FetchContent_MakeAvailable(minhook)
 
 include_directories (${minhook_SOURCE_DIR}/include)
 
-add_library(TCoRFix SHARED src/main.cpp)
-set_target_properties(TCoRFix PROPERTIES PREFIX "")
-set_target_properties(TCoRFix PROPERTIES SUFFIX ".asi")
+add_library(${PROJECT_NAME} SHARED src/main.cpp)
+set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "")
+set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".asi")
 
-target_link_libraries(TCoRFix minhook)
+target_link_libraries(${PROJECT_NAME} minhook)

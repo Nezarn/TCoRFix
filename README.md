@@ -3,7 +3,7 @@ The Chronicles of Riddick: Escape from Butcher Bay OpenGL fixes\workarounds for 
 
 What this thing does:
 - Only returning extensions game requires, this fixes crashes (including the crash related to compressed textures on RTX cards)
-- By enabling "Enable 2.0++ on AMD/ATI" in TCoRFix.ini, shader mode 2.0++ becomes selectable on AMD GPUs ~~until amd decides to break their driver~~
+- By enabling "Enable 2.0++ on any GPU" in TCoRFix.ini, shader mode 2.0++ becomes selectable on ANY GPU
 - Fix GL_MAX_TEXTURE_UNITS error on RTX cards (optional fix, enable "Fix Misc Bugs" in TCoRFix.ini)
 - Adds a workaround for eyeshine flickering
 
