@@ -20,6 +20,7 @@
 bool bFixMiscBugs = false;
 bool bEnable2_0PlusPlus = false;
 bool bFlickerWorkaround = false;
+bool bTextureSizeFix = false;
 
 // Buffer returned for glGetString(GL_EXTENSIONS)
 GLubyte extensionList[1024];
@@ -63,6 +64,31 @@ PFNGLGETQUERYOBJECTUIVARBPROC glGetQueryObjectuivARB = NULL;
 typedef BOOL (WINAPI *PFNWGLCHOOSEPIXELFORMATARBPROC)(HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats);
 PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB = NULL;
 BOOL WINAPI wglChoosePixelFormatARB_hook(HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats);
+
+void patch(void* addr, const char* val, size_t size)
+{
+	DWORD old = 0;
+	VirtualProtect(addr, size, PAGE_EXECUTE_READWRITE, &old);
+	memcpy(addr, val, size);
+	VirtualProtect(addr, size, old, &old);
+}
+
+uint8_t checkGameArch()
+{
+	wchar_t path[MAX_PATH];
+	GetModuleFileNameW(nullptr, path, MAX_PATH);
+
+	if(wcsstr(path, L"Win32_x86_SSE2") != 0)
+		return 3;
+	else if(wcsstr(path, L"Win32_x86_SSE") != 0)
+		return 2;
+	else if(wcsstr(path, L"Win32_x86") != 0)
+		return 1;
+	else if(wcsstr(path, L"Win64_AMD64") != 0)
+		return 0;
+
+	return 4;
+}
 
 void WINAPI glGetIntegerv_hook(GLenum pname, GLint* data)
 {
@@ -297,11 +323,44 @@ void Init()
 	// Read settings from ini
 	const char* ini = ".\\TCoRFix.ini";
 	bFixMiscBugs = GetPrivateProfileIntA("General", "Fix Misc Bugs", 0, ini);
-	bEnable2_0PlusPlus = GetPrivateProfileIntA("General", "Enable 2.0++ on any GPU", 1, ini);
-	bFlickerWorkaround = GetPrivateProfileIntA("General", "Eyeshine Flicker Workaround", 1, ini);
+	bEnable2_0PlusPlus = GetPrivateProfileIntA("General", "Enable 2.0++ on any GPU", 0, ini);
+	bFlickerWorkaround = GetPrivateProfileIntA("General", "Eyeshine Flicker Workaround", 0, ini);
+	bTextureSizeFix = GetPrivateProfileIntA("General", "Fix Texture Size", 0, ini);
 
 	// Preload ogl dll (in case its not loaded yet, so minhook can always work)
-	LoadLibraryA("opengl32.dll");
+	LoadLibraryA("Opengl32.dll");
+
+	if(bTextureSizeFix)
+	{
+		// Game is hardcoded to max 2048 texture size, which breaks every resolution > 2048
+		// This patch removes the limit, and game allows up to what the GPU supports
+		// Which fixes the broken resolutions
+		const wchar_t* rndrgl = L"RndrGL.dll";
+		// Load RndrGL.dll and get its base address
+		LoadLibraryW(rndrgl);
+		uintptr_t rndrglBase = (uintptr_t)GetModuleHandleW(rndrgl);
+		// Dumb, but working way to check which exe we're running
+		uint8_t arch = checkGameArch();
+
+		switch (arch)
+		{
+			case 0: // x64
+				patch(reinterpret_cast<void*>(rndrglBase + 0x84B7), "\xEB", 1);
+				break;
+			case 1: // x86
+				patch(reinterpret_cast<void*>(rndrglBase + 0x63A7), "\xEB", 1);
+				break;
+			case 2: // x86_SSE
+				patch(reinterpret_cast<void*>(rndrglBase + 0x63D7), "\xEB", 1);
+				break;
+			case 3: // x86_SSE2
+				patch(reinterpret_cast<void*>(rndrglBase + 0x63B7), "\xEB", 1);
+				break;
+
+			default:
+				break;
+		}
+	}
 
 	// Init minhook
 	MH_Initialize();
