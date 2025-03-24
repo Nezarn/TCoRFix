@@ -320,6 +320,9 @@ PROC WINAPI wglGetProcAddress_hook(LPCSTR procName)
 
 void Init()
 {
+	// Make game DPI aware (fixes ultra fast mouse on high DPI screens)
+	SetProcessDPIAware();
+
 	// Read settings from ini
 	const char* ini = ".\\TCoRFix.ini";
 	bFixMiscBugs = GetPrivateProfileIntA("General", "Fix Misc Bugs", 0, ini);
@@ -371,7 +374,7 @@ void Init()
 		MH_CreateHookApi(L"opengl32.dll", "glGetIntegerv", glGetIntegerv_hook, (void**)&glGetIntegerv_ori);
 	}
 
-	if (bFlickerWorkaround)
+	if (bFlickerWorkaround || bEnable2_0PlusPlus)
 	{
 		MH_CreateHookApi(L"opengl32.dll", "wglGetProcAddress", wglGetProcAddress_hook, (void**)&wglGetProcAddress_ori);
 	}
